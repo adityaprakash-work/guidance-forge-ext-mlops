@@ -32,7 +32,7 @@ class BaseAgent(ABC):
         )(self.name)
 
     @property
-    def echo(self):
+    def echo(self) -> bool:
         return self._lm.echo
 
     @echo.setter
@@ -55,7 +55,7 @@ class BaseAgent(ABC):
             )
             other = re.sub(r"<gfem:agent:source>.*?</gfem:agent:source>", "", other)
         else:
-            pass
+            source = None
         return self.add(other, source=source)
 
     def format_relay(self, text: str):
@@ -76,12 +76,12 @@ class BaseAgent(ABC):
 
     @property
     @abstractmethod
-    def info(self):
+    def info(self) -> str:
         """Get information about the agent."""
         raise NotImplementedError
 
     @property
-    def last_response(self):
+    def last_response(self) -> str:
         """Get the last response from the agent."""
         # TODO: Very inefficient way of getting the last response. Can we do better?
         # Search for the last occurence of role_start_tag in the _lm and return the text

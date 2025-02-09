@@ -7,13 +7,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import guidance
-from guidance import assistant, gen, role, select, system, user
+from guidance import assistant, gen, role, select, system
 
 from ..utils import prompt_wrap
 from .base import BaseAgent
 
 if TYPE_CHECKING:
     from guidance import RawFunction
+    from guidance.library._block import ContextBlock
     from guidance.models import Model
 
     from .base import Agent
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 
 # --------------------------------------------------------------------------------------
 # TODO: Custom `role` blocks might not be supported, verify.
-def supervisor(text=None, **kwargs):
+def supervisor(text=None, **kwargs) -> ContextBlock:
     """Creates a supervisor role block. Does not enforce the Supervior agent strictly,
     that means any text can be generated under this role."""
     return role("supervisor", text=text, **kwargs)
@@ -50,7 +51,7 @@ class Supervisor(BaseAgent):
         with system():
             self._lm += self.system_prompt + "\n\n### Sub Agents:\n"
             self._lm += "\n".join(
-                f"-\tAgent:{agent.name}\n\t{agent.info.replace('\n', '\n\t')}"
+                f"-\tAgent: {agent.name}\n\t{agent.info.replace('\n', '\n\t')}"
                 for agent in self._sub_agents
             )
             self._lm += (
@@ -64,7 +65,7 @@ class Supervisor(BaseAgent):
             if agent != self:
                 agent.echo = value
 
-    def add(self, other: str | RawFunction, source: str = None):
+    def add(self, other: str | RawFunction, source: str = None) -> Supervisor:
         """Invokes the Supervisor agent by adding text or raw functions to it."""
         # NOTE: `str` is the default `other` to converse with the agent (for now). All
         # other RawFunctions must implement their own logic.
@@ -89,7 +90,7 @@ class Supervisor(BaseAgent):
         return self
 
     @guidance
-    def route(self, lm: Model):
+    def route(self, lm: Model) -> Model:
         """Routes the user query to the appropriate agent."""
         lm_t = lm.copy()
         with assistant():
@@ -106,12 +107,12 @@ class Supervisor(BaseAgent):
         return lm
 
     @property
-    def info(self):
+    def info(self) -> str:
         """Provides detailed information about the Supervisor agent."""
         return prompt_wrap(
             """
         The Supervisor agent is the main contact in the MLOps pipeline, routing tasks 
         to sub-agents based on their expertise. If no routing is needed, it interacts 
-        directly with the user for efficient task management.
+        directly with the user for efficient task management (it routes back to `self`).
         """
         )

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from textwrap import dedent, fill
+from textwrap import dedent, wrap
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -28,5 +28,9 @@ def toggle_echo(lm: Model | list[Model]):
 
 
 def prompt_wrap(text: str, width: int = 120) -> str:
-    """Wrap text to a given width. Mainly for consistency."""
-    return fill(dedent(text), width)
+    """Wrap text to a given width, preserving existing newlines."""
+    dedented_text = dedent(text)
+    wrapped_lines = []
+    for line in dedented_text.splitlines():
+        wrapped_lines.extend(wrap(line, width=width, replace_whitespace=False))
+    return "\n".join(wrapped_lines)

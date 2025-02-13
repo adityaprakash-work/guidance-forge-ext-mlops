@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, TypeVar
 
 import guidance
-from guidance import role, system, assistant
+from guidance import assistant, role, system
 
 from .base import BaseAgent
 
@@ -67,7 +67,8 @@ class BaseToolAgent(BaseAgent, ABC):
     def determine_tool(self, lm: Model) -> Model:
         lm_t = lm.copy()
         with assistant():
-    
+            ...
+
     @property
     @abstractmethod
     def info(self) -> str:

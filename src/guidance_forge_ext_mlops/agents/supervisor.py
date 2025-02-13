@@ -4,11 +4,16 @@
 # ---DEPENDENCIES-----------------------------------------------------------------------
 from __future__ import annotations
 
+import json
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import guidance
 from guidance import assistant, gen, role, select, system
+from guidance import json as gj
+from pydantic import BaseModel, ConfigDict, Field
 
+from ..prompts.agents import sv_beta_cds_plan
 from ..utils import prompt_wrap
 from .base import BaseAgent
 
@@ -65,46 +70,127 @@ class Supervisor(BaseAgent):
             if agent != self:
                 agent.echo = value
 
-    def add(self, other: str | RawFunction, source: str = None) -> Supervisor:
-        """Invokes the Supervisor agent by adding text or raw functions to it."""
-        # NOTE: `str` is the default `other` to converse with the agent (for now). All
-        # other RawFunctions must implement their own logic.
-        if isinstance(other, str):
-            with role(source):
-                self._lm += other
-            self._lm += self.route()
+    def get_planning_schema(self) -> tuple[type[BaseModel], type[BaseModel]]:
+        """Returns the planning schema for the Supervisor agent."""
+        kk_dict = {key: key for key in self._sub_agents}
+        SubAgentsEnumType = StrEnum("SubAgentsEnum", kk_dict)
 
-            if self._lm["route_to"] == "self":
-                with self._role:
-                    self._lm + gen()
-            else:
-                with self._role:
-                    self._lm += f"Routing to {self._lm['route_to']} > "
-                r_subagent = self._sub_agents[self._lm["route_to"]]
-                r_subagent += self.format_relay(f"{self._lm['route_context']}")
-                with r_subagent._role:
-                    self._lm += r_subagent.last_response
+        class AgentCDPlan(BaseModel):
+            """Model for context delegation strategy."""
+
+            model_config = ConfigDict(extra="forbid")
+
+            sa_name: SubAgentsEnumType = Field(
+                ..., description="Name of the sub-agent."
+            )
+            sa_required: bool = Field(
+                ..., description="Whether the sub-agent is required or not."
+            )
+            sa_context_relay: str | None = Field(
+                None, description="Context to be relayed to the sub-agent."
+            )
+
+        class ContextDelegationStrategy(BaseModel):
+            """Model for context delegation strategy."""
+
+            model_config = ConfigDict(extra="forbid")
+
+            cds_plan: list[AgentCDPlan] = Field(
+                ..., description="List of all agent's context delegation plans."
+            )
+
+        return ContextDelegationStrategy, AgentCDPlan
+
+    @staticmethod
+    def cds_json_to_markdown(cds_plan: dict) -> str:
+        """Converts a JSON string to a Markdown formatted string."""
+        markdown_str = "### Context Delegation Strategy:\n"
+        for plan in cds_plan.get("cds_plan", []):
+            markdown_str += f"- **Sub-Agent Name**: {plan['sa_name']}\n"
+            markdown_str += (
+                f"  - **Required**: {'Yes' if plan['sa_required'] else 'No'}\n"
+            )
+            markdown_str += f"  - **Context Relay**: {plan['sa_context_relay']}\n"
+        return markdown_str
+
+    @guidance
+    def plan(self, lm: Model) -> Model:
+        """Plans a context delegation stategy."""
+        lm_t = lm.copy()
+        cdss, acdp = self.get_planning_schema()
+        with assistant():
+            lm_t += (
+                sv_beta_cds_plan
+                + "\n\n ### JSON Response: \n List of all agent's delegation plans -"
+                + f"```json\n{gj('cds_plan', schema=cdss)}\n```"
+            )
+        cds_plan = json.loads(lm_t["cds_plan"])
+        if all(not plan["sa_required]"] for plan in cds_plan):
+            lm = lm.set("route_to", "self")
         else:
-            # For more complex conversation interfaces.
-            self._lm += other
-        return self
+            with self._role:
+                lm += self.cds_json_to_markdown(cds_plan)
+        return lm
 
+    # NOTE: This function will be redundant if `plan` works as expected.
+    # If `select` function's `recurse` parameter is fixed then this function can be
+    # modified to be better suited for the task.
     @guidance
     def route(self, lm: Model) -> Model:
         """Routes the user query to the appropriate agent."""
         lm_t = lm.copy()
         with assistant():
             lm_t += (
-                "Routing to the appropriate sub agent as per the current requirement: "
+                "Routing as per the plan and the best execution order for sub-agents: "
+                "Routing to self if all the listed sub-agents as per the plan are "
+                "executed."
             ) + select(self._sub_agents.keys(), name="route_to")
             if lm_t["route_to"] != "self":
                 lm_t += (
-                    "\nRelaying relevant context and data to the sub-agent as per its "
-                    "specification: " + gen(name="route_context")
+                    f"\nRelaying relevant context and data to {lm_t['route_to']} as per"
+                    " its description: " + gen(name="route_context")
                 )
         lm = lm.set("route_to", lm_t["route_to"])
         lm = lm.set("route_context", lm_t["route_context"])
         return lm
+
+    def add(self, other: str | RawFunction, source: str = None) -> Supervisor:
+        """Invokes the Supervisor agent by adding text or raw functions to it."""
+        # NOTE: `str` is the default `other` to converse with the agent (for now). All
+        # other RawFunctions must implement their own logic.
+        # For now `route()` is used for an additional layer of intelligent relaying of
+        # context in case of hierarchical tool-call topologies.
+        if isinstance(other, str):
+            with role(source):
+                self._lm += other
+            self._lm += self.plan()
+
+            if self._lm["route_to"] == "self":
+                with self._role:
+                    self._lm + gen()
+            else:
+                self._lm = self._lm.set("orchestration_complete", False)
+                counter = 0
+                while not self._lm["orchestration_complete"] and counter < len(
+                    self._sub_agents
+                ):
+                    # TODO: Revamp routing action, possibly replace with plan.
+                    counter += 1
+                    self._lm += self.route()
+                    if self._lm["route_to"] == "self":
+                        with self._role:
+                            self._lm += "\n\nEnd of sub-agent orchestration: " + gen()
+                            break
+                    with self._role:
+                        self._lm += f"Routing to {self._lm['route_to']} > "
+                    r_subagent = self._sub_agents[self._lm["route_to"]]
+                    r_subagent += self.format_relay(f"{self._lm['route_context']}")
+                    with r_subagent._role:
+                        self._lm += r_subagent.last_response
+        else:
+            # For more complex conversational interfaces.
+            self._lm += other
+        return self
 
     @property
     def info(self) -> str:

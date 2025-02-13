@@ -1,7 +1,7 @@
 # ---INFO-------------------------------------------------------------------------------
-"""AI assisted control for MLOps pipelines"""
+"""Prompts for the MLOps pipeline."""
 
 # ---DEPENDENCIES-----------------------------------------------------------------------
-from . import agents, prompts, settings, utils
+from . import agents
 
-__all__ = ["agents", "prompts", "settings", "utils"]
+__all__ = ["agents"]

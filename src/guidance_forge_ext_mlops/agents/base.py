@@ -83,16 +83,12 @@ class BaseAgent(ABC):
     @property
     def last_response(self) -> str:
         """Get the last response from the agent."""
-        # TODO: Very inefficient way of getting the last response. Can we do better?
+        # TODO: Very inefficient way to get the last response. Can we do better?
         # Search for the last occurence of role_start_tag in the _lm and return the text
         # after that.
         _lm_str = str(self._lm)
         last_occurence = _lm_str.rfind(self._role_start_tag)
-        return (
-            _lm_str[last_occurence + len(self._role_start_tag) :]
-            if last_occurence != -1
-            else ""
-        )
+        return _lm_str[last_occurence:] if last_occurence != -1 else ""
 
 
 Agent = TypeVar("Agent", bound=BaseAgent)
